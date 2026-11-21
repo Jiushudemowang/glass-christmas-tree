@@ -76,7 +76,7 @@
   <b>GESTURES · 手势</b>
   <div><span class="k">✊</span> 握拳 — 聚合成树</div>
   <div><span class="k">🖐</span> 张手 — 散作星河</div>
-  <div><span class="k">✌️</span> 比耶 — 化作五角星</div>
+  <div><span class="k">✌️</span> 比耶 — 化作爱心</div>
   <div><span class="k">👌</span> 捏合 — 绽放烟花</div>
   <div style="margin-top:8px;opacity:.5;font-size:10px">无摄像头：鼠标拖拽旋转 · 1/2/3/4 键切换</div>
 </div>
@@ -91,7 +91,7 @@
 <div id="intro">
   <h2>GLASS NOËL</h2>
   <div class="sub">A Little Magic, Just For You</div>
-  <div class="desc">一棵封存于玻璃穹顶中的粒子圣诞树。体积雪在球内下落，彩灯沿树身缓缓流转，许愿光点浮向天际。树、星河、五角星在粒子间流动变形 —— 愿你喜欢这份小小的魔法。</div>
+  <div class="desc">一棵封存于玻璃穹顶中的粒子圣诞树。体积雪在球内下落，彩灯沿树身缓缓流转，许愿光点浮向天际。树、星河、爱心在粒子间流动变形 —— 愿你喜欢这份小小的魔法。</div>
   <button class="btn" id="start">开启魔法 · ENABLE CAMERA</button>
   <div class="note">摄像头仅用于本地手势识别，画面不会上传 · 拒绝亦可体验 · 进入后播放《等雨停》，可按 M 或点底部开关静音</div>
 </div>
@@ -239,12 +239,14 @@ function buildTree() {
   const size = new Float32Array(n);
   const phase = new Float32Array(n);
 
+  // 爱心轮廓：经典心形参数方程，采样成闭合折线
   const starPts = [];
-  for (let i=0;i<10;i++) {
-    const outer = i%2===0;
-    const r = outer ? 7.2 : 3.0;
-    const a = (i/10)*Math.PI*2 - Math.PI/2;
-    starPts.push([Math.cos(a)*r, Math.sin(a)*r]);
+  const HEART_SEG = 160;
+  for (let i=0;i<HEART_SEG;i++) {
+    const a = (i/HEART_SEG)*Math.PI*2;
+    const hx = 16*Math.pow(Math.sin(a),3);
+    const hy = 13*Math.cos(a) - 5*Math.cos(2*a) - 2*Math.cos(3*a) - Math.cos(4*a);
+    starPts.push([hx*0.46, hy*0.46]);
   }
 
   for (let i=0;i<n;i++) {
@@ -263,14 +265,14 @@ function buildTree() {
     const s=Math.sqrt(1-u*u);
     nebula[i3]=Math.cos(th)*s*rr; nebula[i3+1]=u*rr*0.8; nebula[i3+2]=Math.sin(th)*s*rr;
 
-    // STAR：沿五角星轮廓分布 + 少量内部填充
-    const edge = Math.floor(Math.random()*10);
-    const a2=starPts[edge], b2=starPts[(edge+1)%10];
+    // HEART：沿爱心轮廓分布 + 少量内部填充
+    const edge = Math.floor(Math.random()*HEART_SEG);
+    const a2=starPts[edge], b2=starPts[(edge+1)%HEART_SEG];
     const f=Math.random();
     let sx=a2[0]+(b2[0]-a2[0])*f, sy=a2[1]+(b2[1]-a2[1])*f;
-    if (Math.random()<0.18) { sx*=(0.2+Math.random()*0.6); sy*=(0.2+Math.random()*0.6); }
+    if (Math.random()<0.2) { const k=0.2+Math.random()*0.62; sx*=k; sy*=k; }
     const zz=(Math.random()-0.5)*1.6;
-    // 旋转到 XY 正面并抬高
+    // XY 正面并抬高
     star[i3]=sx; star[i3+1]=sy+1.2; star[i3+2]=zz;
 
     pos[i3]=tree[i3]; pos[i3+1]=tree[i3+1]; pos[i3+2]=tree[i3+2];
@@ -674,7 +676,7 @@ function bindInteraction(){
 function setMode(m){
   if(m===3){burstFirework();return;}
   targetMode=m;
-  const names=['TREE','NEBULA','STAR'];
+  const names=['TREE','NEBULA','HEART'];
   document.getElementById('mode').textContent=names[m];
 }
 
@@ -759,7 +761,7 @@ function animate(){
   garlandMat.uniforms.uTime.value=t;
   baseGlowMat.uniforms.uTime.value=t;
 
-  // 彩灯与顶星光芒随形态淡出（星河/五角星形态下隐藏）
+  // 彩灯与顶星光芒随形态淡出（星河/爱心形态下隐藏）
   const treeFade=Math.max(0,1-morph*1.5);
   garlandMat.uniforms.uFade.value=treeFade;
 
@@ -795,7 +797,7 @@ function animate(){
   }
 
   // 玻璃缓慢自转 + 视角惯性
-  // 星形是平面图形：切到 STAR 时回正视角并暂停自转，保证轮廓清晰
+  // 爱心是平面图形：切到 HEART 时回正视角并暂停自转，保证轮廓清晰
   if(targetMode===2){ yaw+=(0-yaw)*Math.min(1,dt*2.0); pitch+=(0-pitch)*Math.min(1,dt*2.0); }
   else if(autoRotate) yaw+=dt*0.075;
   glass.rotation.y=yaw*0.12;
