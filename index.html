@@ -143,9 +143,8 @@ let targetMode = 0;
 let lastShapeMode = 0;            // 进入烟花前的形态，退出时回到它
 let morph = 0, elapsed = 0;
 // 丝滑形态切换：固定时长缓入缓出
-let morphFrom = 0, morphTo = 0, morphStart = 0, morphDur = 1.7, morphing = false;
-// 连续自转角（永不重置，形态切换零跳变）
-let spinY = 0;
+let morphFrom = 0, morphTo = 0, morphStart = 0, morphDur = 2.2, morphing = false;
+// 旋转全部在 shader 内按各自坐标独立施加，插值的是旋转后的结果，切换零跳变
 // 烟花：常驻循环系统
 let fireworksOn = false;
 let cameraTarget = new THREE.Vector3(0, 0, 0);
@@ -246,15 +245,14 @@ function buildTree() {
   const size = new Float32Array(n);
   const phase = new Float32Array(n);
 
-  // 爱心轮廓：经典心形参数方程，采样成闭合折线
-  const starPts = [];
-  const HEART_SEG = 160;
-  for (let i=0;i<HEART_SEG;i++) {
-    const a = (i/HEART_SEG)*Math.PI*2;
-    const hx = 16*Math.pow(Math.sin(a),3);
-    const hy = 13*Math.cos(a) - 5*Math.cos(2*a) - 2*Math.cos(3*a) - Math.cos(4*a);
-    starPts.push([hx*0.46, hy*0.46]);
+  // 爱心：用隐函数 (x²+y²-1)³-x²y³<=0 判定内外，做面积均匀的实心填充
+  // 标准心形隐函数 (x²+y²-1)³ - x²·y³ <= 0 判定内部，域 x∈[-1.15,1.15] y∈[-1.3,1.05]
+  // 用它做拒绝采样得到面积均匀的实心心，避免"只有轮廓"
+  function inHeart(x, y){
+    const v = Math.pow(x*x+y*y-1, 3) - x*x*Math.pow(y,3);
+    return v <= 0;
   }
+  const HEART_SCALE = 6.6;   // 心形放大到场景尺度
 
   for (let i=0;i<n;i++) {
     const i3=i*3;
@@ -267,20 +265,47 @@ function buildTree() {
     tree[i3+1] = y;
     tree[i3+2] = Math.sin(ang)*radius;
 
-    // NEBULA：球内星河
-    const u=Math.random()*2-1, th=Math.random()*Math.PI*2, rr=3+Math.cbrt(Math.random())*7.6;
-    const s=Math.sqrt(1-u*u);
-    nebula[i3]=Math.cos(th)*s*rr; nebula[i3+1]=u*rr*0.8; nebula[i3+2]=Math.sin(th)*s*rr;
+    // NEBULA：银河系 —— 正对相机的扁平盘 + 4 条对数螺旋臂 + 中央亮核 + 弥散晕
+    // 盘面在 XY 平面，绕 Z 轴（自身法线）旋转：螺旋结构清晰可见，且不会擀扁
+    const rnd = Math.random();
+    let gx, gy, gz;
+    if (rnd < 0.16) {
+      // 中央核球：小而亮，略鼓
+      const u=Math.random()*2-1, th=Math.random()*Math.PI*2, r=Math.pow(Math.random(),1.6)*2.8;
+      const sp=Math.sqrt(1-u*u);
+      gx=Math.cos(th)*sp*r; gy=Math.sin(th)*sp*r; gz=u*r*0.8;
+    } else if (rnd < 0.30) {
+      // 弥散晕 / 星际尘埃：稀疏铺开
+      const th=Math.random()*Math.PI*2, r=6+Math.random()*6.0;
+      gx=Math.cos(th)*r; gy=Math.sin(th)*r; gz=(Math.random()-0.5)*4.5;
+    } else {
+      // 螺旋臂：4 条对数螺旋，臂上有散布，越外越宽
+      const arms=4;
+      const arm=Math.floor(Math.random()*arms);
+      const r=2.2 + Math.pow(Math.random(),0.8)*10.0;
+      const spiral = Math.log(r/2.0)*2.8;                 // 缠绕角
+      const baseA = arm*(Math.PI*2/arms) + spiral;
+      const spread = (0.14 + 0.05*r);                     // 臂宽随半径增大
+      const th = baseA + (Math.random()-0.5)*spread;
+      const rr = r + (Math.random()-0.5)*1.0;
+      gx=Math.cos(th)*rr; gy=Math.sin(th)*rr;
+      gz=(Math.random()-0.5)*(1.8*Math.exp(-r/9)+0.6);    // 盘厚：中心厚边缘薄
+    }
+    nebula[i3]=gx; nebula[i3+1]=gy; nebula[i3+2]=gz;
 
-    // HEART：沿爱心轮廓分布 + 少量内部填充
-    const edge = Math.floor(Math.random()*HEART_SEG);
-    const a2=starPts[edge], b2=starPts[(edge+1)%HEART_SEG];
-    const f=Math.random();
-    let sx=a2[0]+(b2[0]-a2[0])*f, sy=a2[1]+(b2[1]-a2[1])*f;
-    if (Math.random()<0.2) { const k=0.2+Math.random()*0.62; sx*=k; sy*=k; }
-    const zz=(Math.random()-0.5)*3.4;
-    // XY 正面并抬高
-    star[i3]=sx; star[i3+1]=sy+1.2; star[i3+2]=zz;
+    // HEART：面积均匀的实心心 —— 在正确域内拒绝采样 + 立体鼓起厚度
+    let ex, ey;
+    for(;;){
+      const nx=(Math.random()*2-1)*1.15;
+      const ny=-1.30+Math.random()*2.35;   // y ∈ -1.30..1.05
+      if(inHeart(nx, ny)){ ex=nx; ey=ny; break; }
+    }
+    let hx2 = ex*HEART_SCALE;
+    let hy2 = ey*HEART_SCALE + 1.6;         // 略微抬高居中
+    // 立体厚度：整体厚实、仅边缘略收，沿 z 鼓起成饱满 3D 心 → 摇摆任何角度都圆润不扁
+    const bulge = Math.max(0.55, 1 - 0.32*Math.abs(ex) - 0.12*Math.abs(ey+0.1));
+    const zz = (Math.random()*2-1) * 5.0 * bulge;
+    star[i3]=hx2; star[i3+1]=hy2; star[i3+2]=zz;
 
     pos[i3]=tree[i3]; pos[i3+1]=tree[i3+1]; pos[i3+2]=tree[i3+2];
 
@@ -310,10 +335,23 @@ function buildTree() {
       attribute vec3 aTree; attribute vec3 aNebula; attribute vec3 aStar;
       attribute vec3 aColor; attribute float aSize; attribute float aPhase;
       varying vec3 vColor; varying float vGlow;
+      mat2 rotY(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
       void main(){
+        // 每套坐标在插值前各自旋转：角度由 uTime 连续驱动，插值的是旋转后的坐标 → 切换零跳变
+        float at = uTime*0.16;                 // 树：绕 Y 缓慢自转
+        float an = uTime*0.13;                 // 银河盘：绕 Z（自身法线）旋转，螺旋臂清晰
+        float ah = sin(uTime*0.55)*0.6;        // 实心心：正面附近 ±34° 3D 摇摆，既饱满又不失心形轮廓
+        vec3 tP = aTree;   tP.xz  = rotY(at)*tP.xz;
+        // 银河绕 Z 轴自转（盘面正对相机）
+        float ca=cos(an), sa=sin(an);
+        vec3 nP = aNebula; nP.xy = mat2(ca,-sa,sa,ca)*nP.xy;
+        vec3 hP = aStar;   hP.xz  = rotY(ah)*hP.xz;
+        float az = sin(uTime*0.4)*0.12;        // 叠加轻微 Z 摆动，立体感更强
+        hP.xy = mat2(cos(az),-sin(az),sin(az),cos(az))*hP.xy;
+
         vec3 p;
-        if(uMorph < 0.5){ p = mix(aTree, aNebula, uMorph); }
-        else { p = mix(aNebula, aStar, uMorph-1.0); }
+        if(uMorph < 0.5){ p = mix(tP, nP, uMorph); }
+        else { p = mix(nP, hP, uMorph-1.0); }
         // 呼吸 / 风动：受控随机，避免僵硬
         p.x += sin(uTime*0.9 + aPhase)*0.10*(1.0-uMorph*0.4);
         p.y += cos(uTime*0.7 + aPhase*1.3)*0.07;
@@ -830,15 +868,9 @@ function animate(){
     morph=morphFrom+(morphTo-morphFrom)*e;
     if(k>=1) morphing=false;
   }
-  // 连续自转：速度随形态平滑变化，角度取模不累积 → 切换零跳变
-  const wTree=Math.max(0,1-morph), wNeb=Math.max(0,1-Math.abs(morph-1)), wHeart=Math.max(0,morph-1);
-  const spinSpeed=wTree*0.18 + wNeb*0.28 + wHeart*0.42;
-  spinY = (spinY + dt*spinSpeed) % (Math.PI*2);
-  // 树/星河：完整自转；爱心：正面附近 3D 摇摆（保持轮廓清晰，不会出现侧面瘪成一条线）
-  const heartSwayY = Math.sin(t*0.7)*0.5;
-  treeParticles.rotation.y = spinY*(1-wHeart) + heartSwayY*wHeart;
-  treeParticles.rotation.z = Math.sin(t*0.5)*0.10*wHeart;
-  if(garlandCore) garlandCore.rotation.y=spinY;   // 彩灯随树同步旋转
+  // 旋转已下放到 shader：三套坐标各自按 uTime 独立旋转后再插值，切换零跳变
+  // 彩灯随树同步旋转（与 shader 中 at=uTime*0.16 保持一致）
+  if(garlandCore) garlandCore.rotation.y = t*0.16;
 
   treeParticles.material.uniforms.uTime.value=t;
   treeParticles.material.uniforms.uMorph.value=morph;
@@ -882,8 +914,8 @@ function animate(){
   }
 
   // 玻璃缓慢自转 + 视角惯性
-  // 爱心形态把相机回正到正面，粒子自身持续 3D 旋转（由 spinY 驱动）
-  if(targetMode===2){ yaw+=(0-yaw)*Math.min(1,dt*2.0); pitch+=(0-pitch)*Math.min(1,dt*2.0); }
+  // 星河/爱心形态把相机回正到正面：银河盘正对相机露出螺旋臂、爱心保持饱满；粒子自身在 shader 内旋转
+  if(targetMode===1 || targetMode===2){ yaw+=(0-yaw)*Math.min(1,dt*2.0); pitch+=(0-pitch)*Math.min(1,dt*2.0); }
   else if(autoRotate) yaw+=dt*0.075;
   glass.rotation.y=yaw*0.12;
   // 呼吸运镜：极缓慢的推拉与浮动，赋予画面生命感
