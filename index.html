@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glass Noël — 玻璃圣诞树</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#05070e; font-family:"Inter","Helvetica Neue",Arial,sans-serif; }
+  #stage { position:fixed; inset:0; }
+  canvas { display:block; }
+
+  /* 顶部标题 */
+  #brand { position:fixed; top:34px; left:0; width:100%; text-align:center; z-index:10; pointer-events:none; }
+  #brand h1 { font-family:Georgia,"Times New Roman",serif; font-weight:400; font-size:clamp(26px,4vw,52px);
+    letter-spacing:.22em; color:#f6e6bf; text-shadow:0 0 34px rgba(255,206,120,.45),0 0 90px rgba(255,180,80,.18); }
+  #brand p { margin-top:8px; font-size:10px; letter-spacing:.42em; color:rgba(230,210,170,.55); text-transform:uppercase; }
+
+  /* 手势说明 */
+  #guide { position:fixed; left:34px; bottom:32px; z-index:10; color:rgba(238,224,196,.72); font-size:12px; line-height:2; pointer-events:none; }
+  #guide b { display:block; color:#f2d79b; font-size:10px; letter-spacing:.28em; margin-bottom:8px; font-weight:500; }
+  .k { display:inline-block; min-width:22px; }
+
+  /* 状态 */
+  #status { position:fixed; right:34px; bottom:32px; z-index:10; text-align:right; pointer-events:none; }
+  #mode { font-family:Georgia,serif; font-size:22px; letter-spacing:.16em; color:#f7dca6; text-shadow:0 0 22px rgba(255,200,110,.5); }
+  #hint { font-size:10px; letter-spacing:.2em; color:rgba(230,210,170,.45); margin-top:6px; }
+
+  /* 音乐开关 */
+  #music { position:fixed; left:50%; bottom:30px; transform:translateX(-50%); z-index:12; display:flex; align-items:center; gap:11px;
+    padding:10px 22px; cursor:pointer; user-select:none; border:1px solid rgba(240,205,140,.28); border-radius:30px;
+    background:rgba(12,18,32,.5); backdrop-filter:blur(8px); transition:.35s; }
+  #music:hover { border-color:rgba(240,205,140,.6); background:rgba(240,205,140,.1); }
+  #music .bars { display:flex; align-items:center; gap:2px; height:14px; }
+  #music .bars i { display:block; width:2px; background:#f2d79b; border-radius:2px; animation:eq 1s ease-in-out infinite; transform-origin:center; }
+  #music .bars i:nth-child(1){height:6px;animation-delay:0s}
+  #music .bars i:nth-child(2){height:12px;animation-delay:.2s}
+  #music .bars i:nth-child(3){height:8px;animation-delay:.4s}
+  #music .bars i:nth-child(4){height:11px;animation-delay:.15s}
+  @keyframes eq{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+  #music .label { font-size:10px; letter-spacing:.18em; color:rgba(240,222,182,.78); white-space:nowrap; }
+  #music.muted .bars i { animation:none; transform:scaleY(.3); opacity:.4; }
+  #music.muted .label { opacity:.5; }
+
+  /* 启动屏 */
+  #intro { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:radial-gradient(ellipse at 50% 45%,#101a2b 0%,#05070e 70%); transition:opacity 1.1s ease; }
+  #intro.gone { opacity:0; pointer-events:none; }
+  #intro h2 { font-family:Georgia,serif; font-weight:400; font-size:clamp(30px,5vw,58px); letter-spacing:.18em;
+    color:#f7e5bd; text-shadow:0 0 46px rgba(255,205,120,.4); }
+  #intro .sub { margin-top:14px; font-size:11px; letter-spacing:.36em; color:rgba(226,206,170,.55); text-transform:uppercase; }
+  #intro .desc { margin-top:32px; max-width:520px; text-align:center; font-size:13px; line-height:2; color:rgba(226,214,190,.6); }
+  .btn { margin-top:38px; padding:15px 44px; border:1px solid rgba(240,205,140,.55); background:rgba(240,205,140,.06);
+    color:#f5dfae; font-size:11px; letter-spacing:.3em; cursor:pointer; transition:.35s; backdrop-filter:blur(6px); }
+  .btn:hover { background:rgba(240,205,140,.18); box-shadow:0 0 34px rgba(255,200,110,.28); }
+  #intro .note { margin-top:20px; font-size:10px; letter-spacing:.14em; color:rgba(226,206,170,.35); }
+
+  /* 摄像头预览 */
+  #cam { position:fixed; left:34px; top:34px; width:150px; height:112px; z-index:10; border:1px solid rgba(240,205,140,.25);
+    border-radius:3px; overflow:hidden; opacity:0; transition:opacity .5s; }
+  #cam.on { opacity:.72; }
+  #cam video { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  #cam canvas { position:absolute; inset:0; width:100%; height:100%; }
+
+  #loading { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; background:#05070e;
+    color:#e8d3a6; font-size:11px; letter-spacing:.3em; transition:opacity .8s; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<div id="brand"><h1>GLASS NOËL</h1><p>A Christmas Tree in a Globe of Light</p></div>
+
+<div id="guide">
+  <b>GESTURES · 手势</b>
+  <div><span class="k">✊</span> 握拳 — 聚合成树</div>
+  <div><span class="k">🖐</span> 张手 — 散作星河</div>
+  <div><span class="k">✌️</span> 比耶 — 化作五角星</div>
+  <div><span class="k">👌</span> 捏合 — 绽放烟花</div>
+  <div style="margin-top:8px;opacity:.5;font-size:10px">无摄像头：鼠标拖拽旋转 · 1/2/3/4 键切换</div>
+</div>
+
+<div id="status"><div id="mode">TREE</div><div id="hint">VOLUMETRIC SNOW · GLASS REFRACTION</div></div>
+
+<div id="music" title="点击开启 / 关闭音乐"><span class="bars"><i></i><i></i><i></i><i></i></span><span class="label" id="trackLabel">MUSIC · OFF</span></div>
+
+<div id="cam"><video id="video" playsinline></video><canvas id="handCanvas" width="150" height="112"></canvas></div>
+
+<div id="intro">
+  <h2>GLASS NOËL</h2>
+  <div class="sub">A Little Magic, Just For You</div>
+  <div class="desc">一棵封存于玻璃穹顶中的粒子圣诞树。体积雪在球内下落，彩灯沿树身缓缓流转，许愿光点浮向天际。树、星河、五角星在粒子间流动变形 —— 愿你喜欢这份小小的魔法。</div>
+  <button class="btn" id="start">开启魔法 · ENABLE CAMERA</button>
+  <div class="note">摄像头仅用于本地手势识别，画面不会上传 · 拒绝亦可体验 · 进入后播放圣诞音乐盒，可按 M 或点底部开关静音</div>
+</div>
+
+<div id="loading">LOADING RENDERER…</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ---------- constants ----------
+const GLOBE_R = 12;
+const PARTICLE_COUNT = 9000;
+const SNOW_COUNT = 4200;
+const STARS_BG = 1400;
+
+const COLORS = {
+  gold:   new THREE.Color('#ffcf70'),
+  amber:  new THREE.Color('#ff9a3c'),
+  emerald:new THREE.Color('#2fbf7a'),
+  ruby:   new THREE.Color('#e2484e'),
+  ivory:  new THREE.Color('#fff4d6'),
+  ice:    new THREE.Color('#bcd8ff'),
+  rose:   new THREE.Color('#ff9ec4'),
+  peach:  new THREE.Color('#ffd0a0'),
+};
+
+let renderer, scene, camera, composer, clock;
+let treeParticles, snow, starfield, glass, fireworks;
+let wishes, garland, starGlow, bokeh, baseGlow;
+let garlandMat, garlandCore, starRayGroup, bokehGroup, baseGlowMat;
+// 音频状态
+let audioCtx=null, masterGain=null, reverb=null, musicOn=false, musicTimer=null, noteCursor=0, nextNoteAt=0, trackIndex=0;
+let mode = 0; // 0=tree 1=nebula 2=star 3=firework
+let targetMode = 0;
+let morph = 0, elapsed = 0;
+let cameraTarget = new THREE.Vector3(0, 0, 0);
+let autoRotate = true;
+let mouseDown=false, lastX=0, lastY=0, yaw=0, pitch=0;
+let fireworkT=0;
+
+init();
+
+function init() {
+  const stage = document.getElementById('stage');
+  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false, powerPreference:'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.72;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  stage.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color('#05070e');
+  scene.fog = new THREE.FogExp2('#05070e', 0.012);
+
+  camera = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, 0.1, 300);
+  camera.position.set(0, 3, 43);
+
+  // 环境光：RoomEnvironment 提供真实反射（玻璃与金属质感的关键）
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+  scene.add(new THREE.AmbientLight('#8098c8', 0.35));
+  const key = new THREE.DirectionalLight('#ffe6b8', 1.5); key.position.set(9, 16, 12); scene.add(key);
+  const rim = new THREE.PointLight('#7fa8ff', 22, 90); rim.position.set(-14, 6, -12); scene.add(rim);
+  const warm = new THREE.PointLight('#ff9c48', 14, 70); warm.position.set(8, -6, 8); scene.add(warm);
+
+  buildGlass();
+  buildTree();
+  buildSnow();
+  buildStarfield();
+  buildGround();
+  buildWishes();      // 漂浮的金色许愿光点
+  buildGarland();     // 树身螺旋彩灯
+  buildStarRay();     // 顶星光芒十字
+  buildBokeh();       // 背景柔光斑（散景）
+  buildBaseGlow();    // 底座地面光晕
+
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.42, 0.5, 0.55);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+
+  clock = new THREE.Clock();
+  window.addEventListener('resize', onResize);
+  bindInteraction();
+  document.getElementById('loading').style.opacity = '0';
+  setTimeout(()=>document.getElementById('loading').remove(), 900);
+  animate();
+}
+
+// ---------- 玻璃穹顶：折射 + 菲涅尔高光 ----------
+function buildGlass() {
+  const geo = new THREE.SphereGeometry(GLOBE_R, 96, 96);
+  const mat = new THREE.MeshPhysicalMaterial({
+    color:0xffffff, metalness:0, roughness:0.035,
+    transmission:0.95, thickness:1.8, ior:1.5,
+    transparent:true, opacity:0.19, side:THREE.DoubleSide,
+    envMapIntensity:0.85, clearcoat:1, clearcoatRoughness:0.05,
+    iridescence:0.35, iridescenceIOR:1.3,
+    depthWrite:false,
+  });
+  glass = new THREE.Mesh(geo, mat);
+  glass.renderOrder = 10;
+  scene.add(glass);
+
+  // 底座：金属环
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(8.4, 9.6, 1.7, 96),
+    new THREE.MeshStandardMaterial({ color:'#7a5a2e', metalness:1, roughness:0.22, envMapIntensity:2.4 })
+  );
+  base.position.y = -GLOBE_R + 0.5;
+  scene.add(base);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(8.5, 0.22, 16, 96),
+    new THREE.MeshStandardMaterial({ color:'#e8c37a', metalness:1, roughness:0.15, emissive:'#5a3a10', emissiveIntensity:0.5 })
+  );
+  ring.rotation.x = Math.PI/2; ring.position.y = -GLOBE_R + 1.35; scene.add(ring);
+}
+
+// ---------- 粒子树：三套目标坐标 + GPU 形态插值 ----------
+function buildTree() {
+  const n = PARTICLE_COUNT;
+  const pos = new Float32Array(n*3);
+  const tree = new Float32Array(n*3);
+  const nebula = new Float32Array(n*3);
+  const star = new Float32Array(n*3);
+  const col = new Float32Array(n*3);
+  const size = new Float32Array(n);
+  const phase = new Float32Array(n);
+
+  const starPts = [];
+  for (let i=0;i<10;i++) {
+    const outer = i%2===0;
+    const r = outer ? 7.2 : 3.0;
+    const a = (i/10)*Math.PI*2 - Math.PI/2;
+    starPts.push([Math.cos(a)*r, Math.sin(a)*r]);
+  }
+
+  for (let i=0;i<n;i++) {
+    const i3=i*3;
+    // TREE：锥形螺旋 + 受控随机（黄金分布）
+    const t = Math.pow(Math.random(), 0.72);
+    const y = -6.2 + t*11.2;
+    const radius = 6.3*Math.pow(1-t, 0.92) * (0.72+Math.random()*0.4);
+    const ang = t*Math.PI*13 + Math.random()*0.55 + i*2.399963;
+    tree[i3]   = Math.cos(ang)*radius;
+    tree[i3+1] = y;
+    tree[i3+2] = Math.sin(ang)*radius;
+
+    // NEBULA：球内星河
+    const u=Math.random()*2-1, th=Math.random()*Math.PI*2, rr=3+Math.cbrt(Math.random())*7.6;
+    const s=Math.sqrt(1-u*u);
+    nebula[i3]=Math.cos(th)*s*rr; nebula[i3+1]=u*rr*0.8; nebula[i3+2]=Math.sin(th)*s*rr;
+
+    // STAR：沿五角星轮廓分布 + 少量内部填充
+    const edge = Math.floor(Math.random()*10);
+    const a2=starPts[edge], b2=starPts[(edge+1)%10];
+    const f=Math.random();
+    let sx=a2[0]+(b2[0]-a2[0])*f, sy=a2[1]+(b2[1]-a2[1])*f;
+    if (Math.random()<0.18) { sx*=(0.2+Math.random()*0.6); sy*=(0.2+Math.random()*0.6); }
+    const zz=(Math.random()-0.5)*1.6;
+    // 旋转到 XY 正面并抬高
+    star[i3]=sx; star[i3+1]=sy+1.2; star[i3+2]=zz;
+
+    pos[i3]=tree[i3]; pos[i3+1]=tree[i3+1]; pos[i3+2]=tree[i3+2];
+
+    const pick=Math.random();
+    const c = pick<0.40 ? COLORS.gold : pick<0.55 ? COLORS.ivory : pick<0.66 ? COLORS.rose : pick<0.78 ? COLORS.amber : pick<0.87 ? COLORS.peach : pick<0.94 ? COLORS.emerald : COLORS.ice;
+    col[i3]=c.r; col[i3+1]=c.g; col[i3+2]=c.b;
+    size[i]=0.75+Math.random()*1.6;
+    phase[i]=Math.random()*Math.PI*2;
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('aTree', new THREE.BufferAttribute(tree,3));
+  geo.setAttribute('aNebula', new THREE.BufferAttribute(nebula,3));
+  geo.setAttribute('aStar', new THREE.BufferAttribute(star,3));
+  geo.setAttribute('aColor', new THREE.BufferAttribute(col,3));
+  geo.setAttribute('aSize', new THREE.BufferAttribute(size,1));
+  geo.setAttribute('aPhase', new THREE.BufferAttribute(phase,1));
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{
+      uTime:{value:0}, uMorph:{value:0}, uPixelRatio:{value:Math.min(devicePixelRatio,2)},
+      uMode:{value:0},
+    },
+    vertexShader:`
+      uniform float uTime; uniform float uMorph; uniform float uPixelRatio; uniform float uMode;
+      attribute vec3 aTree; attribute vec3 aNebula; attribute vec3 aStar;
+      attribute vec3 aColor; attribute float aSize; attribute float aPhase;
+      varying vec3 vColor; varying float vGlow;
+      void main(){
+        vec3 p;
+        if(uMorph < 0.5){ p = mix(aTree, aNebula, uMorph); }
+        else { p = mix(aNebula, aStar, uMorph-1.0); }
+        // 呼吸 / 风动：受控随机，避免僵硬
+        p.x += sin(uTime*0.9 + aPhase)*0.10*(1.0-uMorph*0.4);
+        p.y += cos(uTime*0.7 + aPhase*1.3)*0.07;
+        p.z += sin(uTime*0.8 + aPhase*0.7)*0.10*(1.0-uMorph*0.4);
+        if(uMorph>0.5 && uMorph<1.5){ // 星河缓慢公转
+          float a = uTime*0.07;
+          float ca=cos(a), sa=sin(a);
+          p.xz = mat2(ca,-sa,sa,ca)*p.xz;
+        }
+        vColor = aColor;
+        vGlow = 0.7 + 0.5*sin(uTime*2.2 + aPhase);
+        vec4 mv = modelViewMatrix * vec4(p,1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = aSize * uPixelRatio * (170.0 / -mv.z) * (0.85+vGlow*0.22);
+      }`,
+    fragmentShader:`
+      varying vec3 vColor; varying float vGlow;
+      void main(){
+        vec2 uv = gl_PointCoord - 0.5;
+        float d = length(uv);
+        if(d>0.5) discard;
+        // 核心亮 + 柔和光晕，模拟 Christmas lights
+        float core = smoothstep(0.5,0.02,d);
+        float halo = exp(-d*d*9.0);
+        vec3 c = vColor*(0.28+core*0.62) + vColor*halo*0.18;
+        gl_FragColor = vec4(c, (core*0.62+halo*0.15)*0.66);
+      }`,
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+  });
+  treeParticles = new THREE.Points(geo, mat);
+  scene.add(treeParticles);
+
+  // 顶部五角星（树形态时）
+  const starShape = new THREE.Shape();
+  for(let i=0;i<10;i++){
+    const r=i%2===0?2.0:0.85, a=(i/10)*Math.PI*2-Math.PI/2;
+    const x=Math.cos(a)*r,y=Math.sin(a)*r;
+    i===0?starShape.moveTo(x,y):starShape.lineTo(x,y);
+  }
+  starShape.closePath();
+  const starGeo = new THREE.ExtrudeGeometry(starShape,{depth:0.32,bevelEnabled:true,bevelSize:0.12,bevelThickness:0.12,bevelSegments:3});
+  starGeo.center();
+  const topStar = new THREE.Mesh(starGeo,new THREE.MeshStandardMaterial({
+    color:'#e8b84e', metalness:0.95, roughness:0.22, emissive:'#b46a18', emissiveIntensity:0.55, envMapIntensity:1.2
+  }));
+  topStar.position.y=6.0; topStar.name='topStar'; scene.add(topStar);
+}
+
+// ---------- 体积雪：球内 mesh 粒子 + 法线光照（保时捷雪球核心思路） ----------
+function buildSnow() {
+  const n = SNOW_COUNT;
+  const pos = new Float32Array(n*3);
+  const nor = new Float32Array(n*3);
+  const ph = new Float32Array(n);
+  const sz = new Float32Array(n);
+  for(let i=0;i<n;i++){
+    const i3=i*3;
+    const u=Math.random()*2-1, th=Math.random()*Math.PI*2, r=Math.cbrt(Math.random())*(GLOBE_R-0.8);
+    const s=Math.sqrt(1-u*u);
+    pos[i3]=Math.cos(th)*s*r; pos[i3+1]=u*r; pos[i3+2]=Math.sin(th)*s*r;
+    // 法线朝向球心外，光照随镜头移动正确变化
+    const len=Math.max(0.001,Math.hypot(pos[i3],pos[i3+1],pos[i3+2]));
+    nor[i3]=pos[i3]/len; nor[i3+1]=pos[i3+1]/len; nor[i3+2]=pos[i3+2]/len;
+    ph[i]=Math.random()*100;
+    sz[i]=0.5+Math.random()*1.3;
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('aNormal',new THREE.BufferAttribute(nor,3));
+  geo.setAttribute('aPhase',new THREE.BufferAttribute(ph,1));
+  geo.setAttribute('aSize',new THREE.BufferAttribute(sz,1));
+
+  const mat=new THREE.ShaderMaterial({
+    uniforms:{ uTime:{value:0}, uPixelRatio:{value:Math.min(devicePixelRatio,2)},
+      uLight:{value:new THREE.Vector3(0.5,0.8,0.6).normalize()} },
+    vertexShader:`
+      uniform float uTime; uniform float uPixelRatio; uniform vec3 uLight;
+      attribute vec3 aNormal; attribute float aPhase; attribute float aSize;
+      varying float vLit; varying float vAlpha;
+      void main(){
+        vec3 p = position;
+        // 下落 + 球形对流；落到底部后回到顶部
+        float fall = mod(uTime*(0.32+aSize*0.12) + aPhase, ${(GLOBE_R*2).toFixed(1)});
+        p.y = ${GLOBE_R.toFixed(1)} - fall;
+        p.x += sin(uTime*0.35 + aPhase)*0.28;
+        p.z += cos(uTime*0.28 + aPhase*1.4)*0.28;
+        // 约束在球内
+        float d = length(p);
+        if(d > ${(GLOBE_R-0.5).toFixed(1)}) p *= ${(GLOBE_R-0.5).toFixed(1)}/d;
+        // 法线光照：雪片对光有真实响应
+        vec3 n = normalize(aNormal + vec3(p.x,p.y,p.z)*0.02);
+        vLit = 0.42 + 0.58*max(0.0, dot(n,uLight));
+        vAlpha = smoothstep(${(-GLOBE_R).toFixed(1)},${(-GLOBE_R+2.5).toFixed(1)},p.y)*0.75+0.25;
+        vec4 mv = modelViewMatrix*vec4(p,1.0);
+        gl_Position = projectionMatrix*mv;
+        gl_PointSize = aSize*uPixelRatio*(150.0/-mv.z);
+      }`,
+    fragmentShader:`
+      varying float vLit; varying float vAlpha;
+      void main(){
+        vec2 uv=gl_PointCoord-0.5; float d=length(uv);
+        if(d>0.5) discard;
+        float soft=exp(-d*d*11.0);
+        vec3 c=mix(vec3(0.55,0.68,0.9),vec3(1.0,0.98,0.92),vLit);
+        gl_FragColor=vec4(c,soft*vAlpha*0.30);
+      }`,
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+  });
+  snow=new THREE.Points(geo,mat); snow.renderOrder=5; scene.add(snow);
+}
+
+function buildStarfield(){
+  const n=STARS_BG, pos=new Float32Array(n*3), col=new Float32Array(n*3), sz=new Float32Array(n);
+  for(let i=0;i<n;i++){
+    const i3=i*3, u=Math.random()*2-1, th=Math.random()*Math.PI*2, r=60+Math.random()*90, s=Math.sqrt(1-u*u);
+    pos[i3]=Math.cos(th)*s*r; pos[i3+1]=u*r; pos[i3+2]=Math.sin(th)*s*r;
+    const w=0.7+Math.random()*0.3; col[i3]=w; col[i3+1]=w*0.92; col[i3+2]=w*0.78;
+    sz[i]=0.6+Math.random()*1.8;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  g.setAttribute('aSize',new THREE.BufferAttribute(sz,1));
+  const m=new THREE.ShaderMaterial({
+    uniforms:{uTime:{value:0},uPixelRatio:{value:Math.min(devicePixelRatio,2)}},
+    vertexShader:`uniform float uTime;uniform float uPixelRatio;attribute float aSize;varying vec3 vC;varying float vT;
+      void main(){vC=color;vT=0.6+0.4*sin(uTime*1.2+position.x*0.1);vec4 mv=modelViewMatrix*vec4(position,1.);
+      gl_Position=projectionMatrix*mv;gl_PointSize=aSize*uPixelRatio*(120./-mv.z);}`,
+    fragmentShader:`varying vec3 vC;varying float vT;void main(){vec2 uv=gl_PointCoord-.5;float d=length(uv);if(d>.5)discard;
+      gl_FragColor=vec4(vC,exp(-d*d*12.)*vT*0.8);}`,
+    vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  });
+  starfield=new THREE.Points(g,m); scene.add(starfield);
+}
+
+function buildGround(){
+  const g=new THREE.Mesh(new THREE.CircleGeometry(70,64),new THREE.MeshStandardMaterial({
+    color:'#0d1626',metalness:0.35,roughness:0.7,transparent:true,opacity:0.9,
+  }));
+  g.rotation.x=-Math.PI/2; g.position.y=-GLOBE_R-1.4; scene.add(g);
+}
+
+// ---------- 许愿光点：球外缓慢漂浮上升的金色微尘 ----------
+function buildWishes(){
+  const n=520, pos=new Float32Array(n*3), ph=new Float32Array(n), sz=new Float32Array(n), spd=new Float32Array(n);
+  for(let i=0;i<n;i++){
+    const i3=i*3, u=Math.random()*2-1, th=Math.random()*Math.PI*2, r=13+Math.random()*17, s=Math.sqrt(1-u*u);
+    pos[i3]=Math.cos(th)*s*r; pos[i3+1]=-16+Math.random()*40; pos[i3+2]=Math.sin(th)*s*r;
+    ph[i]=Math.random()*100; sz[i]=0.5+Math.random()*1.4; spd[i]=0.35+Math.random()*0.8;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('aPhase',new THREE.BufferAttribute(ph,1));
+  g.setAttribute('aSize',new THREE.BufferAttribute(sz,1));
+  g.setAttribute('aSpd',new THREE.BufferAttribute(spd,1));
+  const m=new THREE.ShaderMaterial({
+    uniforms:{uTime:{value:0},uPR:{value:Math.min(devicePixelRatio,2)}},
+    vertexShader:`uniform float uTime;uniform float uPR;attribute float aPhase;attribute float aSize;attribute float aSpd;varying float vTw;
+      void main(){vec3 p=position;
+        float rise=mod(uTime*aSpd+aPhase,44.0);
+        p.y=-16.0+rise;
+        p.x+=sin(uTime*0.4+aPhase)*1.2; p.z+=cos(uTime*0.33+aPhase)*1.2;
+        float fade=smoothstep(-16.0,-10.0,p.y)*(1.0-smoothstep(18.0,26.0,p.y));
+        vTw=(0.5+0.5*sin(uTime*2.4+aPhase*3.0))*fade;
+        vec4 mv=modelViewMatrix*vec4(p,1.0);gl_Position=projectionMatrix*mv;
+        gl_PointSize=aSize*uPR*(190.0/-mv.z);}`,
+    fragmentShader:`varying float vTw;void main(){vec2 uv=gl_PointCoord-0.5;float d=length(uv);if(d>0.5)discard;
+      float core=exp(-d*d*22.0), halo=exp(-d*d*5.0);
+      vec3 c=mix(vec3(1.0,0.72,0.36),vec3(1.0,0.95,0.8),core);
+      gl_FragColor=vec4(c,(core+halo*0.35)*vTw*0.85);}`,
+    transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  });
+  wishes=new THREE.Points(g,m); scene.add(wishes);
+}
+
+// ---------- 树身螺旋彩灯：缠绕树干的发光丝带 ----------
+function buildGarland(){
+  const turns=7, steps=1400;
+  const pos=new Float32Array(steps*3), ph=new Float32Array(steps), col=new Float32Array(steps*3);
+  const palette=[new THREE.Color('#ffd166'),new THREE.Color('#ff8fb1'),new THREE.Color('#fff0c0'),new THREE.Color('#9be3ff'),new THREE.Color('#ffb26b')];
+  for(let i=0;i<steps;i++){
+    const t=i/(steps-1), i3=i*3;
+    const y=-6.0+t*11.0;
+    const radius=6.0*Math.pow(1-t,0.92)*1.04;
+    const ang=t*Math.PI*2*turns;
+    pos[i3]=Math.cos(ang)*radius; pos[i3+1]=y; pos[i3+2]=Math.sin(ang)*radius;
+    ph[i]=i*0.06;
+    const c=palette[Math.floor(t*palette.length)%palette.length];
+    col[i3]=c.r;col[i3+1]=c.g;col[i3+2]=c.b;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('aPhase',new THREE.BufferAttribute(ph,1));
+  g.setAttribute('aColor',new THREE.BufferAttribute(col,3));
+  garlandMat=new THREE.ShaderMaterial({
+    uniforms:{uTime:{value:0},uPR:{value:Math.min(devicePixelRatio,2)},uFade:{value:1}},
+    vertexShader:`uniform float uTime;uniform float uPR;uniform float uFade;attribute float aPhase;attribute vec3 aColor;varying vec3 vC;varying float vTw;
+      void main(){vC=aColor;vTw=(0.35+0.65*pow(0.5+0.5*sin(uTime*3.0-aPhase),2.0))*uFade;
+      vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;
+      gl_PointSize=(1.6+1.4*vTw)*uPR*(180.0/-mv.z);}`,
+    fragmentShader:`varying vec3 vC;varying float vTw;void main(){vec2 uv=gl_PointCoord-0.5;float d=length(uv);if(d>0.5)discard;
+      float core=exp(-d*d*24.0),halo=exp(-d*d*4.0);
+      gl_FragColor=vec4(vC,(core+halo*0.3)*vTw*0.9);}`,
+    transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  });
+  garlandCore=new THREE.Points(g,garlandMat); garlandCore.renderOrder=6; scene.add(garlandCore);
+}
+
+// ---------- 顶星光芒：十字衍射星芒 ----------
+function buildStarRay(){
+  starRayGroup=new THREE.Group(); starRayGroup.position.y=6.0;
+  const mkRay=(w,h,color,op)=>{
+    const geo=new THREE.PlaneGeometry(w,h);
+    const mat=new THREE.ShaderMaterial({
+      uniforms:{uColor:{value:new THREE.Color(color)},uOp:{value:op}},
+      vertexShader:`varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+      fragmentShader:`varying vec2 vUv;uniform vec3 uColor;uniform float uOp;void main(){
+        vec2 p=vUv-0.5; float a=exp(-p.x*p.x*220.0)*exp(-p.y*p.y*7.0);
+        gl_FragColor=vec4(uColor,a*uOp);}`,
+      transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,
+    });
+    return new THREE.Mesh(geo,mat);
+  };
+  const h=mkRay(0.42,10,'#ffe9b0',0.55), v=mkRay(10,0.42,'#fff4d0',0.55);
+  const h2=mkRay(0.2,5,'#ffffff',0.45), v2=mkRay(5,0.2,'#ffffff',0.45);
+  starRayGroup.add(h,v,h2,v2);
+  const halo=new THREE.Mesh(new THREE.PlaneGeometry(5,5),new THREE.ShaderMaterial({
+    uniforms:{},
+    vertexShader:`varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader:`varying vec2 vUv;void main(){vec2 p=vUv-0.5;float d=length(p);
+      float g=exp(-d*d*16.0);gl_FragColor=vec4(vec3(1.0,0.85,0.55),g*0.32);}`,
+    transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  }));
+  halo.position.z=-0.1; starRayGroup.add(halo);
+  starRayGroup.renderOrder=8; scene.add(starRayGroup);
+}
+
+// ---------- 背景散景：柔和的暖色光斑 ----------
+function buildBokeh(){
+  bokehGroup=new THREE.Group();
+  const colors=['#ffcf8a','#ff9ec4','#9fc4ff','#ffe0a8','#c9a8ff'];
+  for(let i=0;i<26;i++){
+    const size=3+Math.random()*9;
+    const mat=new THREE.ShaderMaterial({
+      uniforms:{uC:{value:new THREE.Color(colors[i%colors.length])},uOp:{value:0.05+Math.random()*0.09}},
+      vertexShader:`varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+      fragmentShader:`varying vec2 vUv;uniform vec3 uC;uniform float uOp;void main(){vec2 p=vUv-0.5;
+        float d=length(p);float g=exp(-d*d*7.0)*(1.0-smoothstep(0.35,0.5,d));
+        gl_FragColor=vec4(uC,g*uOp);}`,
+      transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,depthTest:false,
+    });
+    const q=new THREE.Mesh(new THREE.PlaneGeometry(size,size),mat);
+    const i3=0, u=Math.random()*2-1, th=Math.random()*Math.PI*2, r=25+Math.random()*45, s=Math.sqrt(1-u*u);
+    q.position.set(Math.cos(th)*s*r,u*r*0.8, -20-Math.random()*35);
+    q.userData={bx:q.position.x,by:q.position.y,ph:Math.random()*6.28,sp:0.1+Math.random()*0.2};
+    bokehGroup.add(q);
+  }
+  bokehGroup.renderOrder=1; scene.add(bokehGroup);
+}
+
+// ---------- 底座地面光晕 ----------
+function buildBaseGlow(){
+  const mat=new THREE.ShaderMaterial({
+    uniforms:{uTime:{value:0}},
+    vertexShader:`varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader:`varying vec2 vUv;uniform float uTime;void main(){vec2 p=vUv-0.5;
+      float d=length(p)*2.0;float g=exp(-d*d*3.2)*0.28*(0.9+0.1*sin(uTime*1.3));
+      vec3 c=mix(vec3(1.0,0.62,0.28),vec3(1.0,0.86,0.55),1.0-d);
+      gl_FragColor=vec4(c,g*(1.0-smoothstep(0.7,1.0,d)));}`,
+    transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,
+  });
+  baseGlowMat=mat;
+  const plane=new THREE.Mesh(new THREE.PlaneGeometry(34,34),mat);
+  plane.rotation.x=-Math.PI/2; plane.position.y=-GLOBE_R-1.3; plane.renderOrder=2; scene.add(plane);
+}
+
+// ---------- 烟花（捏合触发） ----------
+function burstFirework(){
+  fireworkT=1;
+  if(fireworks){ scene.remove(fireworks); fireworks.geometry.dispose(); fireworks.material.dispose(); }
+  const n=1400, pos=new Float32Array(n*3), vel=new Float32Array(n*3), col=new Float32Array(n*3);
+  for(let i=0;i<n;i++){
+    const i3=i*3,u=Math.random()*2-1,th=Math.random()*Math.PI*2,s=Math.sqrt(1-u*u),sp=4+Math.random()*13;
+    vel[i3]=Math.cos(th)*s*sp; vel[i3+1]=u*sp; vel[i3+2]=Math.sin(th)*s*sp;
+    const c=Math.random()<0.5?COLORS.gold:Math.random()<0.5?COLORS.ruby:COLORS.ice;
+    col[i3]=c.r;col[i3+1]=c.g;col[i3+2]=c.b;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('aVel',new THREE.BufferAttribute(vel,3));
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const m=new THREE.ShaderMaterial({
+    uniforms:{uT:{value:0},uPR:{value:Math.min(devicePixelRatio,2)}},
+    vertexShader:`uniform float uT;uniform float uPR;attribute vec3 aVel;varying vec3 vC;varying float vA;
+      void main(){vC=color;vA=1.0-uT;vec3 p=aVel*uT*1.1;p.y-=uT*uT*6.0;
+      vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=(2.0+uPR)*100./-mv.z;}`,
+    fragmentShader:`varying vec3 vC;varying float vA;void main(){vec2 uv=gl_PointCoord-.5;float d=length(uv);if(d>.5)discard;
+      gl_FragColor=vec4(vC,exp(-d*d*9.)*vA);}`,
+    vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  });
+  fireworks=new THREE.Points(g,m); fireworks.position.set(0,1,0); scene.add(fireworks);
+}
+
+// ---------- 配乐：Web Audio 程序化音乐盒（零外部依赖 / 无版权风险） ----------
+// 音符 [MIDI音高, 时值(拍)]，null 表示休止。曲子为公有领域经典。
+const SONGS = [
+  { name:'JINGLE BELLS', bpm:132, notes:[
+    [76,1],[76,1],[76,2], [76,1],[76,1],[76,2], [76,1],[79,1],[72,1],[74,1],[76,4],
+    [77,1],[77,1],[77,1],[77,1], [77,1],[76,1],[76,1],[76,.5],[76,.5],
+    [76,1],[74,1],[74,1],[76,1], [74,2],[79,2],
+    [76,1],[76,1],[76,2], [76,1],[76,1],[76,2], [76,1],[79,1],[72,1],[74,1],[76,4],
+    [77,1],[77,1],[77,1],[77,1], [77,1],[76,1],[76,1],[76,.5],[76,.5],
+    [79,1],[79,1],[77,1],[74,1], [72,4],
+  ]},
+  { name:'SILENT NIGHT', bpm:76, notes:[
+    [67,1.5],[72,.5],[67,1],[64,3], [67,1.5],[72,.5],[67,1],[64,3],
+    [71,2],[71,1],[67,3], [69,2],[69,1],[64,3],
+    [72,1.5],[77,.5],[72,1],[67,3], [72,1.5],[77,.5],[72,1],[67,3],
+    [74,2],[74,1],[71,3], [72,2],[69,1],[67,4],
+  ]},
+  { name:'WE WISH YOU', bpm:120, notes:[
+    [72,1],[77,1],[77,.5],[79,.5],[77,.5],[76,.5],[74,1],[74,1],[74,1],
+    [72,1],[77,1],[77,.5],[79,.5],[77,.5],[76,.5],[74,1],[74,2],
+    [76,1],[76,1],[79,1],[84,1],[79,1],[77,1],[76,1],[77,.5],[76,.5],[74,2],
+    [72,1],[77,1],[77,.5],[79,.5],[77,.5],[76,.5],[74,1],[74,2],
+  ]},
+];
+function mtof(m){ return 440*Math.pow(2,(m-69)/12); }
+
+function makeReverb(ctx){
+  const len=Math.floor(ctx.sampleRate*2.6), buf=ctx.createBuffer(2,len,ctx.sampleRate);
+  for(let ch=0;ch<2;ch++){
+    const d=buf.getChannelData(ch);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.4);
+  }
+  const c=ctx.createConvolver(); c.buffer=buf; return c;
+}
+
+function initAudio(){
+  if(audioCtx) return;
+  const AC=window.AudioContext||window.webkitAudioContext;
+  if(!AC) return;
+  audioCtx=new AC();
+  masterGain=audioCtx.createGain(); masterGain.gain.value=0;
+  reverb=makeReverb(audioCtx);
+  const dry=audioCtx.createGain(); dry.gain.value=0.72;
+  const wet=audioCtx.createGain(); wet.gain.value=0.42;
+  masterGain.connect(dry); dry.connect(audioCtx.destination);
+  masterGain.connect(reverb); reverb.connect(wet); wet.connect(audioCtx.destination);
+}
+
+// 音乐盒单音：正弦基频 + 高八度泛音，快起慢落
+function playBell(freq, at, dur, vel){
+  const o1=audioCtx.createOscillator(), o2=audioCtx.createOscillator();
+  const g1=audioCtx.createGain(), g2=audioCtx.createGain();
+  o1.type='sine'; o1.frequency.value=freq;
+  o2.type='sine'; o2.frequency.value=freq*2.01;
+  g2.gain.value=0.28;
+  o1.connect(g1); o2.connect(g2); g2.connect(g1); g1.connect(masterGain);
+  const peak=0.16*vel;
+  g1.gain.setValueAtTime(0.0001,at);
+  g1.gain.exponentialRampToValueAtTime(peak,at+0.012);
+  g1.gain.exponentialRampToValueAtTime(peak*0.32,at+Math.min(0.5,dur*0.4));
+  g1.gain.exponentialRampToValueAtTime(0.0001,at+dur+1.4);
+  o1.start(at); o2.start(at);
+  o1.stop(at+dur+1.5); o2.stop(at+dur+1.5);
+}
+
+// 低音垫：柔和三角波，每小节根音
+function playPad(freq, at, dur){
+  const o=audioCtx.createOscillator(), g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
+  o.type='triangle'; o.frequency.value=freq;
+  f.type='lowpass'; f.frequency.value=520;
+  o.connect(f); f.connect(g); g.connect(masterGain);
+  g.gain.setValueAtTime(0.0001,at);
+  g.gain.exponentialRampToValueAtTime(0.045,at+0.35);
+  g.gain.exponentialRampToValueAtTime(0.0001,at+dur);
+  o.start(at); o.stop(at+dur+0.1);
+}
+
+function scheduleMusic(){
+  if(!audioCtx||!musicOn) return;
+  const song=SONGS[trackIndex], beat=60/song.bpm;
+  while(nextNoteAt < audioCtx.currentTime+0.35){
+    if(noteCursor>=song.notes.length){
+      noteCursor=0; trackIndex=(trackIndex+1)%SONGS.length;
+      updateTrackLabel(); nextNoteAt+=beat*2; // 换曲间奏
+      continue;
+    }
+    const [m,len]=song.notes[noteCursor];
+    const dur=len*beat;
+    const vel=0.85+Math.random()*0.3;
+    playBell(mtof(m),nextNoteAt,dur,vel);
+    // 每 4 拍加一个低音根音（取音符音级向下两个八度）
+    if(noteCursor%4===0) playPad(mtof(m-24),nextNoteAt,dur*3.2);
+    nextNoteAt+=dur; noteCursor++;
+  }
+}
+
+function updateTrackLabel(){
+  const el=document.getElementById('trackLabel');
+  if(el) el.textContent = musicOn ? ('MUSIC · '+SONGS[trackIndex].name) : 'MUSIC · OFF';
+}
+
+function toggleMusic(){
+  initAudio();
+  if(!audioCtx) return;
+  if(audioCtx.state==='suspended') audioCtx.resume();
+  musicOn=!musicOn;
+  const now=audioCtx.currentTime;
+  if(musicOn){
+    // 重新对齐调度时钟，否则暂停期间的音符会一涌而出
+    noteCursor=0; nextNoteAt=now+0.12;
+    masterGain.gain.cancelScheduledValues(now);
+    masterGain.gain.setValueAtTime(Math.max(0.0001,masterGain.gain.value),now);
+    masterGain.gain.linearRampToValueAtTime(0.9,now+1.2);
+    if(musicTimer) clearInterval(musicTimer);
+    musicTimer=setInterval(scheduleMusic,90);
+    scheduleMusic();
+    document.getElementById('music').classList.remove('muted');
+  }else{
+    masterGain.gain.cancelScheduledValues(now);
+    masterGain.gain.setValueAtTime(Math.max(0.0001,masterGain.gain.value),now);
+    masterGain.gain.linearRampToValueAtTime(0,now+0.6);
+    document.getElementById('music').classList.add('muted');
+  }
+  updateTrackLabel();
+}
+
+// ---------- 交互 ----------
+function bindInteraction(){
+  const el=renderer.domElement;
+  el.addEventListener('mousedown',e=>{mouseDown=true;lastX=e.clientX;lastY=e.clientY;autoRotate=false;});
+  window.addEventListener('mouseup',()=>mouseDown=false);
+  window.addEventListener('mousemove',e=>{
+    if(!mouseDown)return;
+    yaw+=(e.clientX-lastX)*0.005; pitch=Math.max(-0.4,Math.min(0.4,pitch+(e.clientY-lastY)*0.003));
+    lastX=e.clientX;lastY=e.clientY;
+  });
+  el.addEventListener('wheel',e=>{
+    camera.position.z=Math.max(24,Math.min(72,camera.position.z+e.deltaY*0.02));
+  },{passive:true});
+  window.addEventListener('keydown',e=>{
+    if(e.key==='1')setMode(0); if(e.key==='2')setMode(1); if(e.key==='3')setMode(2); if(e.key==='4')burstFirework();
+    if(e.key==='m'||e.key==='M')toggleMusic();
+  });
+  document.getElementById('music').addEventListener('click',toggleMusic);
+  document.getElementById('start').addEventListener('click',startExperience);
+}
+function setMode(m){
+  if(m===3){burstFirework();return;}
+  targetMode=m;
+  const names=['TREE','NEBULA','STAR'];
+  document.getElementById('mode').textContent=names[m];
+}
+
+// ---------- 手势识别（MediaPipe，动态加载，失败不影响主场景） ----------
+let handLandmarker=null, videoEl=null, lastVideoTime=-1, gestureHold=0, lastGesture='';
+async function startExperience(){
+  document.getElementById('intro').classList.add('gone');
+  setTimeout(()=>{const i=document.getElementById('intro');if(i)i.remove();},1200);
+  if(!musicOn) toggleMusic(); // 借这次用户手势解锁并启动配乐
+  try{
+    const vision=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    const fileset=await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    handLandmarker=await vision.HandLandmarker.createFromOptions(fileset,{
+      baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:'GPU'},
+      runningMode:'VIDEO',numHands:1,
+    });
+    videoEl=document.getElementById('video');
+    const stream=await navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:'user'}});
+    videoEl.srcObject=stream; await videoEl.play();
+    document.getElementById('cam').classList.add('on');
+    detectLoop();
+  }catch(err){ console.warn('[glass-noel] gesture unavailable:',err.message); }
+}
+function classify(lm){
+  // 以手腕到中指指根距离为尺度，远近都稳定
+  const scale=Math.hypot(lm[9].x-lm[0].x,lm[9].y-lm[0].y)+1e-6;
+  const tips=[4,8,12,16,20], pips=[3,6,10,14,18];
+  const ext=tips.map((t,i)=>{
+    const d=Math.hypot(lm[t].x-lm[0].x,lm[t].y-lm[0].y);
+    return d/scale;
+  });
+  const openCount=ext.filter((v,i)=>v>(i===0?1.05:1.55)).length;
+  const pinch=Math.hypot(lm[4].x-lm[8].x,lm[4].y-lm[8].y)/scale<0.35;
+  if(pinch && openCount<=2) return 'PINCH';
+  if(openCount>=4) return 'OPEN';
+  if(ext[1]>1.5&&ext[2]>1.5&&ext[3]<1.25&&ext[4]<1.25) return 'PEACE';
+  if(openCount<=1) return 'FIST';
+  return '';
+}
+function detectLoop(){
+  if(!handLandmarker||!videoEl)return;
+  if(videoEl.currentTime!==lastVideoTime){
+    lastVideoTime=videoEl.currentTime;
+    try{
+      const res=handLandmarker.detectForVideo(videoEl,performance.now());
+      const cv=document.getElementById('handCanvas'),cx=cv.getContext('2d');
+      cx.clearRect(0,0,cv.width,cv.height);
+      if(res.landmarks&&res.landmarks.length){
+        const lm=res.landmarks[0];
+        cx.strokeStyle='rgba(245,215,150,.9)';cx.lineWidth=1.4;
+        const conn=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+        conn.forEach(([a,b])=>{cx.beginPath();cx.moveTo(lm[a].x*cv.width,lm[a].y*cv.height);cx.lineTo(lm[b].x*cv.width,lm[b].y*cv.height);cx.stroke();});
+        const g=classify(lm);
+        if(g&&g!==lastGesture){ lastGesture=g; gestureHold=0; }
+        if(g){
+          gestureHold++;
+          if(gestureHold===6){
+            if(g==='FIST')setMode(0);
+            if(g==='OPEN')setMode(1);
+            if(g==='PEACE')setMode(2);
+            if(g==='PINCH')burstFirework();
+          }
+        }
+      } else { lastGesture=''; gestureHold=0; }
+    }catch(e){}
+  }
+  requestAnimationFrame(detectLoop);
+}
+
+// ---------- 动画 ----------
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(clock.getDelta(),0.05); elapsed+=dt; const t=elapsed;
+  const target = targetMode===0?0 : targetMode===1?1 : 2;
+  morph += (target-morph)*Math.min(1,dt*2.2);
+
+  treeParticles.material.uniforms.uTime.value=t;
+  treeParticles.material.uniforms.uMorph.value=morph;
+  snow.material.uniforms.uTime.value=t;
+  starfield.material.uniforms.uTime.value=t;
+  wishes.material.uniforms.uTime.value=t;
+  garlandMat.uniforms.uTime.value=t;
+  baseGlowMat.uniforms.uTime.value=t;
+
+  // 彩灯与顶星光芒随形态淡出（星河/五角星形态下隐藏）
+  const treeFade=Math.max(0,1-morph*1.5);
+  garlandMat.uniforms.uFade.value=treeFade;
+
+  // 顶星缓慢旋转 + 呼吸；光芒十字始终面向相机并轻微脉动
+  const topStar=scene.getObjectByName('topStar');
+  if(topStar){
+    topStar.rotation.y=t*0.5;
+    topStar.material.emissiveIntensity=0.5+0.2*Math.sin(t*2.6);
+    topStar.visible=morph<0.35;
+    topStar.scale.setScalar(Math.max(0.001,1-morph*2.8));
+  }
+  if(starRayGroup){
+    starRayGroup.visible=morph<0.3;
+    const pulse=0.9+0.14*Math.sin(t*2.2);
+    starRayGroup.children.forEach((c,i)=>{
+      c.lookAt(camera.position);
+      if(c.material.uniforms&&c.material.uniforms.uOp) c.material.uniforms.uOp.value=(i<2?0.55:0.45)*pulse*treeFade;
+    });
+    starRayGroup.position.y=6.0+0.12*Math.sin(t*1.6);
+  }
+  if(bokehGroup){
+    bokehGroup.children.forEach(q=>{
+      const d=q.userData;
+      q.position.x=d.bx+Math.sin(t*d.sp+d.ph)*2.2;
+      q.position.y=d.by+Math.cos(t*d.sp*0.8+d.ph)*1.6;
+    });
+  }
+
+  if(fireworks){
+    fireworkT+=dt*0.55;
+    fireworks.material.uniforms.uT.value=fireworkT;
+    if(fireworkT>=1){scene.remove(fireworks);fireworks.geometry.dispose();fireworks.material.dispose();fireworks=null;fireworkT=0;}
+  }
+
+  // 玻璃缓慢自转 + 视角惯性
+  // 星形是平面图形：切到 STAR 时回正视角并暂停自转，保证轮廓清晰
+  if(targetMode===2){ yaw+=(0-yaw)*Math.min(1,dt*2.0); pitch+=(0-pitch)*Math.min(1,dt*2.0); }
+  else if(autoRotate) yaw+=dt*0.075;
+  glass.rotation.y=yaw*0.12;
+  // 呼吸运镜：极缓慢的推拉与浮动，赋予画面生命感
+  const breath=Math.sin(t*0.18)*2.4;
+  const rad=43+breath;
+  camera.position.x += (Math.sin(yaw)*rad - camera.position.x)*0.06;
+  camera.position.z += (Math.cos(yaw)*rad - camera.position.z)*0.06;
+  const targetY=3+Math.sin(pitch)*14+Math.sin(t*0.23)*0.7;
+  camera.position.y += (targetY - camera.position.y)*0.06;
+  cameraTarget.y += (Math.sin(t*0.2)*0.25 - cameraTarget.y)*0.05;
+  camera.lookAt(cameraTarget);
+
+  composer.render();
+}
+function onResize(){
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);composer.setSize(innerWidth,innerHeight);
+}
+</script>
+</body>
+</html>
