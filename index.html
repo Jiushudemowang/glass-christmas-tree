@@ -77,7 +77,7 @@
   <div><span class="k">✊</span> 握拳 — 聚合成树</div>
   <div><span class="k">🖐</span> 张手 — 散作星河</div>
   <div><span class="k">✌️</span> 比耶 — 化作爱心</div>
-  <div><span class="k">👌</span> 捏合 — 满屏烟花（再捏退出）</div>
+  <div><span class="k">👌</span> 比 OK — 满屏烟花（再比退出）</div>
   <div style="margin-top:8px;opacity:.5;font-size:10px">无摄像头：拖拽旋转 · 1/2/3 切换 · 4 烟花开关</div>
 </div>
 
@@ -825,8 +825,8 @@ function classify(lm){
   });
   const openCount=ext.filter((v,i)=>v>(i===0?1.05:1.55)).length;
   const pinch=Math.hypot(lm[4].x-lm[8].x,lm[4].y-lm[8].y)/scale<0.4;
-  // 捏合：拇指食指靠近 + 中指伸直（区别于握拳——握拳时中指是弯的）
-  if(pinch && ext[2]>1.35) return 'PINCH';
+  // 标准 OK 手势（👌）：拇指食指捏成圈 + 中指/无名指/小指三根全部伸直；其他一律不触发烟花
+  if(pinch && ext[2]>1.30 && ext[3]>1.30 && ext[4]>1.30) return 'PINCH';
   if(openCount>=4) return 'OPEN';
   if(ext[1]>1.5&&ext[2]>1.5&&ext[3]<1.25&&ext[4]<1.25) return 'PEACE';
   if(openCount<=1) return 'FIST';
