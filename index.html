@@ -77,8 +77,8 @@
   <div><span class="k">✊</span> 握拳 — 聚合成树</div>
   <div><span class="k">🖐</span> 张手 — 散作星河</div>
   <div><span class="k">✌️</span> 比耶 — 化作爱心</div>
-  <div><span class="k">👌</span> 捏合 — 绽放烟花</div>
-  <div style="margin-top:8px;opacity:.5;font-size:10px">无摄像头：鼠标拖拽旋转 · 1/2/3/4 键切换</div>
+  <div><span class="k">👌</span> 捏合 — 满屏烟花（再捏退出）</div>
+  <div style="margin-top:8px;opacity:.5;font-size:10px">无摄像头：拖拽旋转 · 1/2/3 切换 · 4 烟花开关</div>
 </div>
 
 <div id="status"><div id="mode">TREE</div><div id="hint">VOLUMETRIC SNOW · GLASS REFRACTION</div></div>
@@ -138,13 +138,19 @@ let wishes, garland, starGlow, bokeh, baseGlow;
 let garlandMat, garlandCore, starRayGroup, bokehGroup, baseGlowMat;
 // 音频状态
 let musicOn=false, bgm=null;
-let mode = 0; // 0=tree 1=nebula 2=star 3=firework
+let mode = 0; // 0=tree 1=nebula 2=heart 3=firework
 let targetMode = 0;
+let lastShapeMode = 0;            // 进入烟花前的形态，退出时回到它
 let morph = 0, elapsed = 0;
+// 丝滑形态切换：固定时长缓入缓出
+let morphFrom = 0, morphTo = 0, morphStart = 0, morphDur = 1.7, morphing = false;
+// 连续自转角（永不重置，形态切换零跳变）
+let spinY = 0;
+// 烟花：常驻循环系统
+let fireworksOn = false;
 let cameraTarget = new THREE.Vector3(0, 0, 0);
 let autoRotate = true;
 let mouseDown=false, lastX=0, lastY=0, yaw=0, pitch=0;
-let fireworkT=0;
 
 init();
 
@@ -184,6 +190,7 @@ function init() {
   buildStarRay();     // 顶星光芒十字
   buildBokeh();       // 背景柔光斑（散景）
   buildBaseGlow();    // 底座地面光晕
+  buildFireworks();   // 预构建满屏烟花（默认隐藏，触发即用）
 
   composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
@@ -271,7 +278,7 @@ function buildTree() {
     const f=Math.random();
     let sx=a2[0]+(b2[0]-a2[0])*f, sy=a2[1]+(b2[1]-a2[1])*f;
     if (Math.random()<0.2) { const k=0.2+Math.random()*0.62; sx*=k; sy*=k; }
-    const zz=(Math.random()-0.5)*1.6;
+    const zz=(Math.random()-0.5)*3.4;
     // XY 正面并抬高
     star[i3]=sx; star[i3+1]=sy+1.2; star[i3+2]=zz;
 
@@ -311,11 +318,6 @@ function buildTree() {
         p.x += sin(uTime*0.9 + aPhase)*0.10*(1.0-uMorph*0.4);
         p.y += cos(uTime*0.7 + aPhase*1.3)*0.07;
         p.z += sin(uTime*0.8 + aPhase*0.7)*0.10*(1.0-uMorph*0.4);
-        if(uMorph>0.5 && uMorph<1.5){ // 星河缓慢公转
-          float a = uTime*0.07;
-          float ca=cos(a), sa=sin(a);
-          p.xz = mat2(ca,-sa,sa,ca)*p.xz;
-        }
         vColor = aColor;
         vGlow = 0.7 + 0.5*sin(uTime*2.2 + aPhase);
         vec4 mv = modelViewMatrix * vec4(p,1.0);
@@ -583,31 +585,98 @@ function buildBaseGlow(){
   plane.rotation.x=-Math.PI/2; plane.position.y=-GLOBE_R-1.3; plane.renderOrder=2; scene.add(plane);
 }
 
-// ---------- 烟花（捏合触发） ----------
-function burstFirework(){
-  fireworkT=0;
-  if(fireworks){ scene.remove(fireworks); fireworks.geometry.dispose(); fireworks.material.dispose(); }
-  const n=1400, pos=new Float32Array(n*3), vel=new Float32Array(n*3), col=new Float32Array(n*3);
-  for(let i=0;i<n;i++){
-    const i3=i*3,u=Math.random()*2-1,th=Math.random()*Math.PI*2,s=Math.sqrt(1-u*u),sp=6+Math.random()*16;
-    vel[i3]=Math.cos(th)*s*sp; vel[i3+1]=u*sp; vel[i3+2]=Math.sin(th)*s*sp;
-    const c=Math.random()<0.5?COLORS.gold:Math.random()<0.5?COLORS.ruby:COLORS.ice;
-    col[i3]=c.r;col[i3+1]=c.g;col[i3+2]=c.b;
+// ---------- 烟花：满屏多处齐放、常驻循环绽放 ----------
+// 设计：把整场烟花做成一个常驻 Points。每颗粒子带自己的爆点(origin)、
+// 速度(vel)、颜色、发射相位(phase)与周期(cycle)。顶点着色器用 mod(uTime+phase, cycle)
+// 让每颗花按各自节奏无限循环，覆盖满屏多个爆点，从此不再“一闪而过”。
+function buildFireworks(){
+  const SHELLS = 11;            // 满屏同时绽放的烟花簇数量
+  const PER = 900;              // 每簇粒子数
+  const n = SHELLS*PER;
+  const pos=new Float32Array(n*3), vel=new Float32Array(n*3), col=new Float32Array(n*3);
+  const phase=new Float32Array(n), cycle=new Float32Array(n), sz=new Float32Array(n);
+  const palette=[COLORS.gold,COLORS.amber,COLORS.ruby,COLORS.rose,COLORS.ice,COLORS.peach,COLORS.ivory];
+  let idx=0;
+  for(let s=0;s<SHELLS;s++){
+    // 爆点铺满整个视野：横向 -22..22，纵向 -7..17，纵深 -10..10
+    const ox=(Math.random()*2-1)*22;
+    const oy=-7+Math.random()*24;
+    const oz=(Math.random()*2-1)*10;
+    const shellCycle=2.6+Math.random()*2.2;         // 每簇独立周期
+    const shellPhase=Math.random()*shellCycle;       // 错峰发射
+    const base=palette[Math.floor(Math.random()*palette.length)];
+    const accent=palette[Math.floor(Math.random()*palette.length)];
+    const speed=9+Math.random()*9;                   // 爆炸半径（够大）
+    for(let j=0;j<PER;j++,idx++){
+      const i3=idx*3;
+      pos[i3]=ox; pos[i3+1]=oy; pos[i3+2]=oz;
+      const u=Math.random()*2-1, th=Math.random()*Math.PI*2, rr=Math.sqrt(1-u*u);
+      // 球形爆炸，略带纵向拉伸，更像真实礼花
+      vel[i3]=Math.cos(th)*rr*speed;
+      vel[i3+1]=u*speed*1.15+1.5;
+      vel[i3+2]=Math.sin(th)*rr*speed;
+      const c=Math.random()<0.72?base:accent;
+      // 少量随机提亮，制造火花层次
+      const k=0.75+Math.random()*0.5;
+      col[i3]=Math.min(1,c.r*k);col[i3+1]=Math.min(1,c.g*k);col[i3+2]=Math.min(1,c.b*k);
+      phase[idx]=shellPhase; cycle[idx]=shellCycle; sz[idx]=0.7+Math.random()*1.8;
+    }
   }
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(pos,3));
   g.setAttribute('aVel',new THREE.BufferAttribute(vel,3));
-  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  g.setAttribute('aColor',new THREE.BufferAttribute(col,3));
+  g.setAttribute('aPhase',new THREE.BufferAttribute(phase,1));
+  g.setAttribute('aCycle',new THREE.BufferAttribute(cycle,1));
+  g.setAttribute('aSize',new THREE.BufferAttribute(sz,1));
   const m=new THREE.ShaderMaterial({
-    uniforms:{uT:{value:0},uPR:{value:Math.min(devicePixelRatio,2)}},
-    vertexShader:`uniform float uT;uniform float uPR;attribute vec3 aVel;varying vec3 vC;varying float vA;
-      void main(){vC=color;vA=1.0-uT;vec3 p=aVel*uT*1.1;p.y-=uT*uT*6.0;
-      vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=(3.0+uPR)*130./-mv.z;}`,
-    fragmentShader:`varying vec3 vC;varying float vA;void main(){vec2 uv=gl_PointCoord-.5;float d=length(uv);if(d>.5)discard;
-      gl_FragColor=vec4(vC,exp(-d*d*9.)*vA);}`,
-    vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+    uniforms:{uTime:{value:0},uPR:{value:Math.min(devicePixelRatio,2)}},
+    vertexShader:`
+      uniform float uTime; uniform float uPR;
+      attribute vec3 aVel; attribute vec3 aColor; attribute float aPhase; attribute float aCycle; attribute float aSize;
+      varying vec3 vC; varying float vA;
+      void main(){
+        float age = mod(uTime + aPhase, aCycle) / aCycle;   // 0..1 无限循环
+        vec3 p = position + aVel*age*1.25;
+        p.y -= age*age*7.0;                                  // 重力下坠
+        // 起爆瞬间强、随后消散；尾段淡出避免突变
+        float a = smoothstep(0.0,0.04,age) * (1.0-smoothstep(0.45,1.0,age));
+        vA = a; vC = aColor;
+        vec4 mv = modelViewMatrix * vec4(p,1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = aSize * uPR * (200.0 / -mv.z) * (0.4 + a*0.9);
+      }`,
+    fragmentShader:`
+      varying vec3 vC; varying float vA;
+      void main(){
+        vec2 uv=gl_PointCoord-0.5; float d=length(uv); if(d>0.5) discard;
+        float core=exp(-d*d*22.0), halo=exp(-d*d*5.0);
+        gl_FragColor=vec4(vC*(0.55+core*0.9), (core+halo*0.35)*vA);
+      }`,
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
   });
-  fireworks=new THREE.Points(g,m); fireworks.position.set(0,7,6); scene.add(fireworks);
+  fireworks=new THREE.Points(g,m);
+  fireworks.frustumCulled=false;
+  fireworks.visible=false;
+  scene.add(fireworks);
+}
+function toggleFireworks(){
+  fireworksOn=!fireworksOn;
+  if(fireworksOn){
+    if(!fireworks) buildFireworks();
+    fireworks.visible=true;
+    document.getElementById('mode').textContent='FIREWORKS';
+  }else{
+    if(fireworks) fireworks.visible=false;
+    const names=['TREE','NEBULA','HEART'];
+    document.getElementById('mode').textContent=names[lastShapeMode];
+    targetMode=lastShapeMode;
+  }
+  updateFireworkHint();
+}
+function updateFireworkHint(){
+  const hint=document.getElementById('hint');
+  if(hint) hint.textContent = fireworksOn ? '满屏烟花 · 持续绽放' : 'VOLUMETRIC SNOW · GLASS REFRACTION';
 }
 
 // ---------- 配乐：《等雨停》 ----------
@@ -667,17 +736,20 @@ function bindInteraction(){
     camera.position.z=Math.max(24,Math.min(72,camera.position.z+e.deltaY*0.02));
   },{passive:true});
   window.addEventListener('keydown',e=>{
-    if(e.key==='1')setMode(0); if(e.key==='2')setMode(1); if(e.key==='3')setMode(2); if(e.key==='4')burstFirework();
+    if(e.key==='1')setMode(0); if(e.key==='2')setMode(1); if(e.key==='3')setMode(2); if(e.key==='4')toggleFireworks();
     if(e.key==='m'||e.key==='M')toggleMusic();
   });
   document.getElementById('music').addEventListener('click',toggleMusic);
   document.getElementById('start').addEventListener('click',startExperience);
 }
 function setMode(m){
-  if(m===3){burstFirework();return;}
+  if(fireworksOn) toggleFireworks();       // 若在烟花模式，先退出并恢复形态
+  morphFrom=morph; morphTo=m; morphStart=elapsed; morphing=true;  // 触发丝滑过渡
   targetMode=m;
+  lastShapeMode=m;
   const names=['TREE','NEBULA','HEART'];
   document.getElementById('mode').textContent=names[m];
+  updateFireworkHint();
 }
 
 // ---------- 手势识别（MediaPipe，动态加载，失败不影响主场景） ----------
@@ -738,7 +810,7 @@ function detectLoop(){
             if(g==='FIST')setMode(0);
             if(g==='OPEN')setMode(1);
             if(g==='PEACE')setMode(2);
-            if(g==='PINCH')burstFirework();
+            if(g==='PINCH')toggleFireworks();
           }
         }
       } else { lastGesture=''; gestureHold=0; }
@@ -751,8 +823,22 @@ function detectLoop(){
 function animate(){
   requestAnimationFrame(animate);
   const dt=Math.min(clock.getDelta(),0.05); elapsed+=dt; const t=elapsed;
-  const target = targetMode===0?0 : targetMode===1?1 : 2;
-  morph += (target-morph)*Math.min(1,dt*2.2);
+  // 丝滑形态过渡：固定时长 easeInOutCubic，起止都为 0 速度
+  if(morphing){
+    const k=Math.min(1,(elapsed-morphStart)/morphDur);
+    const e = k<0.5 ? 4*k*k*k : 1-Math.pow(-2*k+2,3)/2;
+    morph=morphFrom+(morphTo-morphFrom)*e;
+    if(k>=1) morphing=false;
+  }
+  // 连续自转：速度随形态平滑变化，角度取模不累积 → 切换零跳变
+  const wTree=Math.max(0,1-morph), wNeb=Math.max(0,1-Math.abs(morph-1)), wHeart=Math.max(0,morph-1);
+  const spinSpeed=wTree*0.18 + wNeb*0.28 + wHeart*0.42;
+  spinY = (spinY + dt*spinSpeed) % (Math.PI*2);
+  // 树/星河：完整自转；爱心：正面附近 3D 摇摆（保持轮廓清晰，不会出现侧面瘪成一条线）
+  const heartSwayY = Math.sin(t*0.7)*0.5;
+  treeParticles.rotation.y = spinY*(1-wHeart) + heartSwayY*wHeart;
+  treeParticles.rotation.z = Math.sin(t*0.5)*0.10*wHeart;
+  if(garlandCore) garlandCore.rotation.y=spinY;   // 彩灯随树同步旋转
 
   treeParticles.material.uniforms.uTime.value=t;
   treeParticles.material.uniforms.uMorph.value=morph;
@@ -791,14 +877,12 @@ function animate(){
     });
   }
 
-  if(fireworks){
-    fireworkT+=dt*0.38;
-    fireworks.material.uniforms.uT.value=fireworkT;
-    if(fireworkT>=1){scene.remove(fireworks);fireworks.geometry.dispose();fireworks.material.dispose();fireworks=null;fireworkT=0;}
+  if(fireworks && fireworksOn){
+    fireworks.material.uniforms.uTime.value=t;   // 满屏循环绽放，常驻不销毁
   }
 
   // 玻璃缓慢自转 + 视角惯性
-  // 爱心是平面图形：切到 HEART 时回正视角并暂停自转，保证轮廓清晰
+  // 爱心形态把相机回正到正面，粒子自身持续 3D 旋转（由 spinY 驱动）
   if(targetMode===2){ yaw+=(0-yaw)*Math.min(1,dt*2.0); pitch+=(0-pitch)*Math.min(1,dt*2.0); }
   else if(autoRotate) yaw+=dt*0.075;
   glass.rotation.y=yaw*0.12;
