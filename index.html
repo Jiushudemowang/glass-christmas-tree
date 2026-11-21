@@ -84,6 +84,7 @@
 <div id="status"><div id="mode">TREE</div><div id="hint">VOLUMETRIC SNOW · GLASS REFRACTION</div></div>
 
 <div id="music" title="点击开启 / 关闭音乐"><span class="bars"><i></i><i></i><i></i><i></i></span><span class="label" id="trackLabel">MUSIC · OFF</span></div>
+<audio id="bgm" src="dengyuting.mp3" loop preload="auto"></audio>
 
 <div id="cam"><video id="video" playsinline></video><canvas id="handCanvas" width="150" height="112"></canvas></div>
 
@@ -92,7 +93,7 @@
   <div class="sub">A Little Magic, Just For You</div>
   <div class="desc">一棵封存于玻璃穹顶中的粒子圣诞树。体积雪在球内下落，彩灯沿树身缓缓流转，许愿光点浮向天际。树、星河、五角星在粒子间流动变形 —— 愿你喜欢这份小小的魔法。</div>
   <button class="btn" id="start">开启魔法 · ENABLE CAMERA</button>
-  <div class="note">摄像头仅用于本地手势识别，画面不会上传 · 拒绝亦可体验 · 进入后播放圣诞音乐盒，可按 M 或点底部开关静音</div>
+  <div class="note">摄像头仅用于本地手势识别，画面不会上传 · 拒绝亦可体验 · 进入后播放《等雨停》，可按 M 或点底部开关静音</div>
 </div>
 
 <div id="loading">LOADING RENDERER…</div>
@@ -136,7 +137,7 @@ let treeParticles, snow, starfield, glass, fireworks;
 let wishes, garland, starGlow, bokeh, baseGlow;
 let garlandMat, garlandCore, starRayGroup, bokehGroup, baseGlowMat;
 // 音频状态
-let audioCtx=null, masterGain=null, reverb=null, musicOn=false, musicTimer=null, noteCursor=0, nextNoteAt=0, trackIndex=0;
+let musicOn=false, bgm=null;
 let mode = 0; // 0=tree 1=nebula 2=star 3=firework
 let targetMode = 0;
 let morph = 0, elapsed = 0;
@@ -607,127 +608,44 @@ function burstFirework(){
   fireworks=new THREE.Points(g,m); fireworks.position.set(0,1,0); scene.add(fireworks);
 }
 
-// ---------- 配乐：Web Audio 程序化音乐盒（零外部依赖 / 无版权风险） ----------
-// 音符 [MIDI音高, 时值(拍)]，null 表示休止。曲子为公有领域经典。
-const SONGS = [
-  { name:'JINGLE BELLS', bpm:132, notes:[
-    [76,1],[76,1],[76,2], [76,1],[76,1],[76,2], [76,1],[79,1],[72,1],[74,1],[76,4],
-    [77,1],[77,1],[77,1],[77,1], [77,1],[76,1],[76,1],[76,.5],[76,.5],
-    [76,1],[74,1],[74,1],[76,1], [74,2],[79,2],
-    [76,1],[76,1],[76,2], [76,1],[76,1],[76,2], [76,1],[79,1],[72,1],[74,1],[76,4],
-    [77,1],[77,1],[77,1],[77,1], [77,1],[76,1],[76,1],[76,.5],[76,.5],
-    [79,1],[79,1],[77,1],[74,1], [72,4],
-  ]},
-  { name:'SILENT NIGHT', bpm:76, notes:[
-    [67,1.5],[72,.5],[67,1],[64,3], [67,1.5],[72,.5],[67,1],[64,3],
-    [71,2],[71,1],[67,3], [69,2],[69,1],[64,3],
-    [72,1.5],[77,.5],[72,1],[67,3], [72,1.5],[77,.5],[72,1],[67,3],
-    [74,2],[74,1],[71,3], [72,2],[69,1],[67,4],
-  ]},
-  { name:'WE WISH YOU', bpm:120, notes:[
-    [72,1],[77,1],[77,.5],[79,.5],[77,.5],[76,.5],[74,1],[74,1],[74,1],
-    [72,1],[77,1],[77,.5],[79,.5],[77,.5],[76,.5],[74,1],[74,2],
-    [76,1],[76,1],[79,1],[84,1],[79,1],[77,1],[76,1],[77,.5],[76,.5],[74,2],
-    [72,1],[77,1],[77,.5],[79,.5],[77,.5],[76,.5],[74,1],[74,2],
-  ]},
-];
-function mtof(m){ return 440*Math.pow(2,(m-69)/12); }
-
-function makeReverb(ctx){
-  const len=Math.floor(ctx.sampleRate*2.6), buf=ctx.createBuffer(2,len,ctx.sampleRate);
-  for(let ch=0;ch<2;ch++){
-    const d=buf.getChannelData(ch);
-    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.4);
-  }
-  const c=ctx.createConvolver(); c.buffer=buf; return c;
-}
-
-function initAudio(){
-  if(audioCtx) return;
-  const AC=window.AudioContext||window.webkitAudioContext;
-  if(!AC) return;
-  audioCtx=new AC();
-  masterGain=audioCtx.createGain(); masterGain.gain.value=0;
-  reverb=makeReverb(audioCtx);
-  const dry=audioCtx.createGain(); dry.gain.value=0.72;
-  const wet=audioCtx.createGain(); wet.gain.value=0.42;
-  masterGain.connect(dry); dry.connect(audioCtx.destination);
-  masterGain.connect(reverb); reverb.connect(wet); wet.connect(audioCtx.destination);
-}
-
-// 音乐盒单音：正弦基频 + 高八度泛音，快起慢落
-function playBell(freq, at, dur, vel){
-  const o1=audioCtx.createOscillator(), o2=audioCtx.createOscillator();
-  const g1=audioCtx.createGain(), g2=audioCtx.createGain();
-  o1.type='sine'; o1.frequency.value=freq;
-  o2.type='sine'; o2.frequency.value=freq*2.01;
-  g2.gain.value=0.28;
-  o1.connect(g1); o2.connect(g2); g2.connect(g1); g1.connect(masterGain);
-  const peak=0.16*vel;
-  g1.gain.setValueAtTime(0.0001,at);
-  g1.gain.exponentialRampToValueAtTime(peak,at+0.012);
-  g1.gain.exponentialRampToValueAtTime(peak*0.32,at+Math.min(0.5,dur*0.4));
-  g1.gain.exponentialRampToValueAtTime(0.0001,at+dur+1.4);
-  o1.start(at); o2.start(at);
-  o1.stop(at+dur+1.5); o2.stop(at+dur+1.5);
-}
-
-// 低音垫：柔和三角波，每小节根音
-function playPad(freq, at, dur){
-  const o=audioCtx.createOscillator(), g=audioCtx.createGain(), f=audioCtx.createBiquadFilter();
-  o.type='triangle'; o.frequency.value=freq;
-  f.type='lowpass'; f.frequency.value=520;
-  o.connect(f); f.connect(g); g.connect(masterGain);
-  g.gain.setValueAtTime(0.0001,at);
-  g.gain.exponentialRampToValueAtTime(0.045,at+0.35);
-  g.gain.exponentialRampToValueAtTime(0.0001,at+dur);
-  o.start(at); o.stop(at+dur+0.1);
-}
-
-function scheduleMusic(){
-  if(!audioCtx||!musicOn) return;
-  const song=SONGS[trackIndex], beat=60/song.bpm;
-  while(nextNoteAt < audioCtx.currentTime+0.35){
-    if(noteCursor>=song.notes.length){
-      noteCursor=0; trackIndex=(trackIndex+1)%SONGS.length;
-      updateTrackLabel(); nextNoteAt+=beat*2; // 换曲间奏
-      continue;
-    }
-    const [m,len]=song.notes[noteCursor];
-    const dur=len*beat;
-    const vel=0.85+Math.random()*0.3;
-    playBell(mtof(m),nextNoteAt,dur,vel);
-    // 每 4 拍加一个低音根音（取音符音级向下两个八度）
-    if(noteCursor%4===0) playPad(mtof(m-24),nextNoteAt,dur*3.2);
-    nextNoteAt+=dur; noteCursor++;
-  }
-}
-
+// ---------- 配乐：《等雨停》 ----------
 function updateTrackLabel(){
   const el=document.getElementById('trackLabel');
-  if(el) el.textContent = musicOn ? ('MUSIC · '+SONGS[trackIndex].name) : 'MUSIC · OFF';
+  if(el) el.textContent = musicOn ? 'MUSIC · 等雨停' : 'MUSIC · OFF';
 }
 
 function toggleMusic(){
-  initAudio();
-  if(!audioCtx) return;
-  if(audioCtx.state==='suspended') audioCtx.resume();
+  if(!bgm) bgm=document.getElementById('bgm');
+  if(!bgm) return;
   musicOn=!musicOn;
-  const now=audioCtx.currentTime;
   if(musicOn){
-    // 重新对齐调度时钟，否则暂停期间的音符会一涌而出
-    noteCursor=0; nextNoteAt=now+0.12;
-    masterGain.gain.cancelScheduledValues(now);
-    masterGain.gain.setValueAtTime(Math.max(0.0001,masterGain.gain.value),now);
-    masterGain.gain.linearRampToValueAtTime(0.9,now+1.2);
-    if(musicTimer) clearInterval(musicTimer);
-    musicTimer=setInterval(scheduleMusic,90);
-    scheduleMusic();
+    bgm.volume=0.0;
+    const p=bgm.play();
+    if(p&&p.then){
+      p.then(()=>{
+        // 渐入，避免突然出声
+        const t0=performance.now();
+        const fade=()=>{
+          const k=Math.min(1,(performance.now()-t0)/1200);
+          bgm.volume=0.82*k;
+          if(k<1) requestAnimationFrame(fade);
+        };
+        fade();
+      }).catch(()=>{ musicOn=false; document.getElementById('music').classList.add('muted'); updateTrackLabel(); });
+    }else{
+      bgm.volume=0.82;
+    }
     document.getElementById('music').classList.remove('muted');
   }else{
-    masterGain.gain.cancelScheduledValues(now);
-    masterGain.gain.setValueAtTime(Math.max(0.0001,masterGain.gain.value),now);
-    masterGain.gain.linearRampToValueAtTime(0,now+0.6);
+    // 渐出后暂停
+    const from=bgm.volume, t0=performance.now();
+    const fade=()=>{
+      const k=Math.min(1,(performance.now()-t0)/500);
+      bgm.volume=from*(1-k);
+      if(k<1) requestAnimationFrame(fade);
+      else bgm.pause();
+    };
+    fade();
     document.getElementById('music').classList.add('muted');
   }
   updateTrackLabel();
