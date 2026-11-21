@@ -31,7 +31,9 @@ python -m http.server 8000
 | 挥手 / 鼠标拖拽 | 旋转视角 |
 | 键盘 `M` 或底部胶囊按钮 | 音乐开关 |
 
-启动时自动播放音乐盒配乐，**Jingle Bells → Silent Night → We Wish You a Merry Christmas** 三首公有领域名曲轮播。
+启动时自动播放配乐 **《等雨停》**（`dengyuting.mp3`，循环播放），带 1.2 秒渐入 / 0.5 秒渐出。可按 `M` 或点底部胶囊开关静音。
+
+> 音乐文件版权归原权利人所有，仅用于个人展示；如需公开发布或商用，请自行确认授权。
 
 ## 技术
 
@@ -40,7 +42,7 @@ python -m http.server 8000
 - 玻璃穹顶：`transmission` + `ior 1.5` + `clearcoat` 真实折射
 - UnrealBloom 后处理 + 程序化十字星芒、螺旋彩灯、许愿光点、散景
 - MediaPipe Tasks Vision 手势识别（失败时自动回退到鼠标/键盘）
-- Web Audio 合成音乐盒音色 + 卷积混响
+- HTML5 Audio 循环播放本地 MP3，渐入渐出音量控制
 
 灵感来自 Forged.build 为保时捷做的 Holiday Snow Globe（WebGPU 体积雪），本站按其思路用 WebGL 重写。
 
